@@ -1,0 +1,387 @@
+---
+title: "Toaster Analysis Final Project"
+author: 'Griffin Lovato'
+subtitle: SDS 4110 & 5111 - Experimental Design
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+fontsize: 11pt
+header-includes:
+- \usepackage{hyperref}
+- \hypersetup{pdfpagemode={UseNone}, pdfstartview=}
+- \usepackage{amsthm}
+- \theoremstyle{definition}
+- \newtheorem{problem}{Problem}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(fig.align = "center", fig.height = 4, fig.width = 5)
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 68), tidy = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+<font size="5">**Introduction:**</font>
+
+My project revolves around analyzing the effectiveness of the settings of my toaster--the model being Studio by Dualit 2 Slice Toaster--in heating food, in this case, frozen waffles. I inherited this toaster from my family, who did not want it due to the perceived arbitrary nature of the toaster settings leading to unpredictable performance in terms of the temperature of food. 
+
+I entered this project with the following research question:
+*What are the effects of changing the toaster power, freeze, and slot settings, as well as waiting between toaster uses, on the output temperature of frozen waffles?*
+
+<font size="5">**Objectives:**</font> 
+
+To answer my research question, I had two primary objectives that I wanted to complete:
+
+1. Determine if the following *toaster settings* have a consistent effect on waffle temperature:
+- Which **Side** of the toaster a waffle is placed
+- If the **“Freeze Button”** is turned on or off
+- What level the **“Power Dial”** is set to.
+
+2. Determine if the following *environmental factor* has a consistent effect on waffle temperature:
+- The **Cooldown Time** since the toaster was last activated
+
+<font size="5">**Pilot Tests:**</font> 
+
+Before setting up my factors, I ran several different pilot tests in order to select appropriate factor levels to ensure that no waffle output by the toaster was outright inedible due to either being too burnt or untoasted.
+
+In regards to the **Cooldown Time**, this factor appeared to have a large effect on waffle temperature while keeping the other factors constant. Shorter cooldown times, such as re-activating the toaster immediately after it was just used at power 5, resulted in higher temperature waffles. From examining the internal toaster temperature, this effect was strongest with no cooldown time (0 minutes), tapered off rapidly from 0 to 5 minutes, and the internal toaster temperature returned to the base temperature of my apartment (70 degrees Fahrenheit) in approximately 15 minutes.
+
+In regard to the **Power Level**, this factor also appeared to have a large effect on waffle temperature. The function appeared to work via not necessairly increasing the power of the toaster, but rather toasting for longer the higher level the power dial was set to. I noted that this time toaster appeared to be affected by cooldown time; for example, the hotter the internals of the toaster were due to short cooldown times, the same power level would toast for a shorter time in an attempt to "compensate" for the increased starting temperature. However, the decreased time toasting still resulted in higher waffle temperatures due to the aforementioned increased starting temperature. To restrict the levels of this factor to ones I deemed relevant to the project, I only used power levels that resulted in waffles that I deemed edible. Waffles toasted at power setting 6 or above, regardless of cooldown time, side, or freezer button, were too crunchy or burnt to enjoy, while waffles toasted at power setting 1 were still too cold or even frozen on the inside.
+
+<font size="5">**Factor Explanations:**</font> 
+
+```{r}
+library(agricolae)
+library(daewr)
+library(car)
+library(MASS)
+set.seed(4110)
+#Note: This is where the R code blocks start, hence where I import all the libraries I utilized for this project.
+```
+
+The experimental unit and observational unit for this experiment were each individual **Waffle**. Each of the 64 waffles put through the toaster has a completely unique combination of treatment factors applied to it.
+
+```{r}
+waffle = 1:64
+```
+
+The response of this experiment was the **Temperature**. This was a continuous response variable, measured in degrees Fahrenheit.
+
+Each of the 4 treatment factors was treated as a Fixed Factor. Based on the research question, this project only pertains to my toaster specifically. From the pilot tests, I deemed other possible treatment levels for Cooldown Time and Power Level irrelevant.
+
+Treatment factor 1 was the **Cooldown Time**. This factor was utilized as a normal treatment factor in the Completely Randomized Factorial Design (CRFD) version of my experiment, while being utilized as the first blocking factor in the Latin Square Design (LSD) version of the experiment. In either case, the factor has 4 levels, defined as the waiting period in minutes between the empty toaster running for a full cycle at power level 5 and beginning the actual experiment cycle on the waffle with the appropriate treatment factors. Based off the pilot tests, I chose levels 0, 5, 10, and 15.
+```{r}
+cooldown = c(0, 5, 10, 15)
+cooldown = factor(cooldown)
+```
+
+Treatment factor 2 was the **Power Level**. This factor was utilized as a normal treatment factor in the CRFD version of my experiment, while being utilized as the second blocking factor in the LSD version of the experiment. In either case, the factor has 4 levels, defined as the level the power dial of the toaster is set to during the experiment cycle on the waffle. Again, based of the pilot tests, I chose levels 2, 3, 4, and 5.
+```{r}
+power = c(2, 3, 4, 5)
+power = factor(power)
+```
+
+Treatment factor 3 was the **Freeze Button**. This factor was utilized as a normal treatment factor in both versions of the experiment. The factor has 2 levels, defined as if the freeze button is OFF (encoded as N or 0 throughout this project) or ON (encoded as Y or 1 throughout this project) during the experiment cycle on the waffle.
+```{r}
+freeze = c(0, 1)
+freeze = factor(freeze)
+```
+
+Treatment factor 4 was the **Side** of the toaster. This factor was utilized as a normal treatment factor in both versions of the experiment. The factor has 2 levels, defined as if the slot the waffle is inserted into during the experiment cycle is the LEFT slot (encoded as L or 0 throughout this project) or the RIGHT slot (encoded as R or 1 throughout this project). 
+```{r}
+side = c("L", "R")
+side = factor(side)
+```
+
+For the CRD version of the experiment, this requires 4^2^ * 2^2^ = 64 waffles with only 1 replicate per unique factor combination. All unique factor combinations are seen in coef below.
+```{r}
+coef = expand.grid(cooldown = cooldown, power = power, freeze = freeze, side = side)
+#coef
+```
+
+<font size="5">**Experimental Procedure:**</font> 
+
+The actual experimental procedure to obtain the temperature for each waffle is as follows:
+
+- Setup: Plug in toaster, set thermostat to 70 degrees Fahrenheit 
+- Step 1: Set toaster to power setting 5 and freezer button OFF 
+- Step 2: Activate toaster without putting anything in and let it run until popping up
+- Step 3: Set timer to the relevant cooldown time in minutes and wait
+- Step 4: Once timer alarm sounds, open freezer, take 1 waffle out of freezer, and close freezer 
+- Step 5: Insert waffle in the relevant side of toaster with the relevant power setting and freezer button selection
+- Step 6: Activate toaster and let it run until waffle pops up
+- Step 7: Take out waffle and implant temperature measuring device along the center waffle “ridge”
+- Step 8: Wait for temperature to stabilize (~5 seconds) and record temperature in degrees Fahrenheit
+- Repeat step 1-8 for all 64 waffles
+
+<font size="5">**Model and Design – Completely Randomized Factorial Design:**</font> 
+
+**Experimental Model:**
+
+𝑻~𝒊𝒋𝒌𝒎~ = 𝒄~𝒊~ + 𝒑~𝒋~ + 𝒔~𝒌~ + 𝒇~𝒎~ + 𝜺~𝒊𝒋𝒌𝒎~
+
+- 𝑻~𝒊𝒋𝒌𝒎~ is the output **Temperature** of the waffle
+- 𝒄~𝒊~ is the effect from the i-th level of **Cooldown Time**
+- 𝒑~𝒋~ is the effect from the j-th level of **Power Level**
+- 𝒔~𝒌~ is the effect from the k-th level of **Side**
+- 𝒇~𝒎~ is the effect from the m-th level of **Freeze Button**
+- 𝜺~𝒊𝒋𝒌𝒎~ is the **Experimental Error**
+The CRFD version of the expeirment requires 𝟒^𝟐^ ×𝟐^𝟐^ = 𝟔𝟒 waffles with only 1 replicate per combination
+
+**Experimental Design:**
+
+Below is the R code for the randomization of the order of treatments for the CRFD version of the experiment, plan_crd. I output plan_crd as a CSV file, filling out the blank Temperature column in Microsoft Excel throughout the expeiriment.
+```{r}
+coef = coef[sample(64),] 
+plan_crd = cbind(waffle, coef)
+plan_crd[, 'temperature'] = NA
+#plan_crd
+#write.csv(plan_crd, "waffle.csv", row.names=FALSE)
+```
+
+<font size="5">**Model and Design – Latin Square Design:**</font> 
+
+**Experimental Model:**
+
+𝑻~𝒊𝒋𝒌𝒎~ = 𝒄~𝒊~ + 𝒑~𝒋~ + 𝒔~𝒌~ + 𝒇~𝒎~ + 𝒒~𝒌𝒎~ + 𝜺~𝒊𝒋𝒌𝒎~
+
+- 𝑻~𝒊𝒋𝒌𝒎~ is the output **Temperature** of the waffle
+- 𝒄~𝒊~ is the block effect from the i-th level of **Cooldown Time**
+- 𝒑~𝒋~ is the block effect from the j-th level of **Power Level**
+- 𝒔~𝒌~ is the effect from the k-th level of **Side**
+- 𝒇~𝒎~ is the effect from the m-th level of **Freeze Button**
+- 𝒒~𝒌𝒎~ is the interaction effect of the k-th level of **Side** and the m-th level of **Freeze Button**
+- 𝜺~𝒊𝒋𝒌𝒎~ is the **Experimental Error**
+The LSD version of the expeirment requires only 𝟒^𝟐^ = 𝟏𝟔 waffles with only 1 replicate per combination
+
+**Experimental Design:**
+
+Below is the R code for the randomization of the order of treatments for the LSD version of the experiment, plan_lsd. I output plan_lsd as a CSV file, filling out the blank Temperature column in Microsoft Excel once the CRFD version was completed by inserting the recorded temperatures from the CRFD version into the relevant rows of plan_lsd.
+```{r}
+treat_lsd = c("LY", "LN", "RY", "RN")
+plan_lsd = design.lsd(treat_lsd, randomization=TRUE)$book
+levels(plan_lsd$row) = paste("Cooldown Time", c(0, 5, 10, 15))
+levels(plan_lsd$col) = paste("Power", 2:5)
+plan_lsd[, 'temperature'] = NA
+#plan_lsd
+#write.csv(plan_lsd, "waffle_lsd.csv", row.names=FALSE)
+```
+
+<font size="5">**Replicates/Power Analysis:**</font> 
+
+Note that for the CRFD version of the expeirment, I had only 1 replicate for each combination of cooldown-power-freeze-side. This was partially out of a lack of resources to complete a CRFD version of the experiment with 2 or more replicates, as it would require at least double the amount of waffles and far more time. In addition, I was unable to perform power analysis anyways, as this would require a nonexistent FPower4 function in R to analyze the 4-way interaction of the 4 treatment variables.
+
+<font size="5">**Timetable and Budget:**</font> 
+
+**Timetable:**
+
+I calculated the approximate time the CRFD version of the experiment would take beforehand based off some timing from the pilot tests. The average power level 5 pre-heat toasting time was 2 minutes. The average cooldown time for each waffle in the experiment was (0 + 5 + 10 + 15)/4 = 7.5 minutes. The average toasting time between power levels 2, 3, 4, and 5 was about 1.5 minutes. These sum up to 11 minutes per waffle. For a 64-waffle experiment, this totals to 11 * 64 = 704 minutes, or about **11 hours and 45 minutes**. I set aside a long weekend and planned to complete the experiment in 4 3-hour sessions. Thankfully, as most of this experimental time is merely waiting for the toaster to cool down for the Cooldown Time factor, I did not have to be directly attending to the experiment for this entire time. I was only actively conducting the experiment, namely inserting/removing waffles or recording temperatures, for a little more than **3 hours**.
+
+**Budget:**
+
+For this experiment, I bought 1 box of Kellogg's Eggo Homestyle Waffles, 72-count, from the University City Costco for about **$12.00**. Due to the pilot tests and me making mistakes throughout the experiment that required redoing multiple waffles, I had to buy another 10-count Kellogg's Eggo Homestyle Waffles box from a local store for **$5.00**, but I am unsure about the exact price. The toaster itself was a hand-me-down, hence I am unsure about the price.
+
+<font size="5">**Planned Method for Data Analysis of Results:**</font> 
+
+For both the CRFD and LSD versions of the experiment, my planned method for data analysis was largely the same. I would...
+
+- Fit models using the aov() function
+- Use plot() for both diagnostic checks of the fitted models as well as boxplot visualizations of factor effects
+- Use TukeyHSD() to get Tukey’s Honestly Significant Difference for all levels of each relevant factor
+- Use interaction.plot() on each combination of factors to visualize interaction effects
+
+<font size="5">**Results – Completely Randomized Factorial Design:**</font> 
+
+Analysis of the results first required extracting them from the filled-in CSV and recasting each treatment as a factor.
+```{r}
+results <- read.csv("waffle_finished.csv", header=TRUE)
+results$waffle <- as.factor(results$waffle)
+results$cooldown <- as.factor(results$cooldown)
+results$power <- as.factor(results$power)
+results$freeze <- as.factor(results$freeze)
+results$side <- as.factor(results$side)
+```
+
+Here is my fitting of my model using the aov() function as fit_crd before any transformations of Temperature:
+```{r}
+fit_crd <- aov(temperature ~ cooldown + power + freeze + side, results)
+anova(fit_crd)
+```
+From the Analysis of Variance Table, Cooldown, Power, and Freeze all have highly significant effects on predicting untransformed Temperature, with a majority of the residuals accounted for from Power. Side has no signifcant effect on predicting Temperature.
+
+Below I ran diagnostic checks of this untransformed model:
+```{r}
+par(mfrow = c(2, 2))
+plot(fit_crd)
+```
+As is apparent in the concave down appearance of the Residuals vs Fitted plot, it would not make sense to assume homoskedacity of varaince across different fitted values of Temperature, as the fitted model appears to overpredict the Temperature of Waffles at both extremely low (under 150 degrees Fahrenheit) and extremely high (over 190 degrees Fahrenheit) temperatures. In addition, the large tails of the Q-Q Residuals plot suggest that the assumption that untransformed Temperature follows a normal distribution is false too.
+
+```{r}
+lambda = c(-1, 0, 1, 2)
+boxcox(fit_crd, lambda)
+```
+By utilizing boxcox() to determine of a transformation of Temperature may be appropriate, we see that the 95% CI for optimal lambda does not include 1 (untransformed temperature) yet does contain 2 (which would mean transforming temperature by squaring it and fitting a new model). 
+
+Hence, I transformed temperature by fitting a new model below and reperforming Analysis of Variance.
+```{r}
+fit_crd_sq <- aov(temperature^2 ~ cooldown + power + freeze + side, results)
+anova(fit_crd_sq)
+```
+Despite the transformation, the significance/insignificance of each of the the treatment factors in predicting Temperature has not changed. Cooldown, Power, and Freeze remain highly significant, while Side remains insignificant.
+
+After re-performing diagnostics...
+```{r}
+par(mfrow = c(2, 2))
+plot(fit_crd_sq)
+```
+We can see minor-yet-visible improvements in the Q-Q Residuals plot and (somewhat) in the Residuals vs Fitted plot. It still may be unwise to assume homoskedascity of variance.
+
+Below are boxplots of each individual factor and its effect on Temperature squared:
+```{r}
+par(mfrow = c(2, 2))
+plot(temperature^2 ~ cooldown + power + freeze + side, results)
+```
+Before using TukeyHSD() to double-check, we can see that these boxplots visually reinforce the insights made from Analysis of Variance. Namely,
+
+1. Cooldown Time of 0 minutes appears to result in higher temperatures than 5, 10, or 15 minutes on average.
+2. Higher Power Levels appear to result in higher temperatures on average.
+3. Setting the Freeze Button to ON appears to result in higher temperatures on average.
+4. Side doesn't appear to result in higher or lower temperatures.
+
+Now plotting each factor using TukeyHSD() to make definitive conclusions about which factor settings contribute to hotter/colder waffles...
+```{r}
+crd_tukey_cooldown <- TukeyHSD(fit_crd_sq, "cooldown")
+crd_tukey_power <- TukeyHSD(fit_crd_sq, "power")
+crd_tukey_freeze <- TukeyHSD(fit_crd_sq, "freeze")
+crd_tukey_side <- TukeyHSD(fit_crd_sq, "side")
+
+crd_tukey_cooldown
+par(mfrow = c(2, 2))
+plot(crd_tukey_cooldown)
+crd_tukey_power
+plot(crd_tukey_power)
+crd_tukey_freeze
+plot(crd_tukey_freeze)
+crd_tukey_side
+plot(crd_tukey_side)
+```
+Cooldown Time of 0 minutes results in higher average waffle Temperature than 5, 10, or 15 minutes.
+
+With the narrow exclusion of Power Levels 4 and 5, the higher the Power Level, the higher the average Waffle Temperature.
+
+Setting the Freeze Button to ON results in substantially higher average Waffle Temperatures.
+
+No conclusions can be made about the Left or Right slots of the toaster contributing to higher or lower temperatures.
+
+Looking at the 2-way interaction plots for every factor combination...
+```{r}
+par(mfrow = c(2, 3))
+interaction.plot(results$side, results$freeze, (results$temperature)^2, type = "b", trace.label = "Freeze", xlab = "Side", ylab = "Temperature^2", lty = rep(1, 2), col = 1:2, pch = rep(16, 2), lwd = rep(4, 2))
+
+interaction.plot(results$side, results$cooldown, (results$temperature)^2, type = "b", trace.label = "Cooldown Time", xlab = "Side", ylab = "Temperature^2", lty = rep(1, 4), col = 1:4, pch = rep(16, 4), lwd = rep(4, 4))
+
+interaction.plot(results$side, results$power, (results$temperature)^2, type = "b", trace.label = "Power Level", xlab = "Side", ylab = "Temperature^2", lty = rep(1, 4), col = 1:4, pch = rep(16, 4), lwd = rep(4, 4))
+
+interaction.plot(results$freeze, results$power, (results$temperature)^2, type = "b", trace.label = "Power Level", xlab = "Freeze", ylab = "Temperature^2", lty = rep(1, 4), col = 1:4, pch = rep(16, 4), lwd = rep(4, 4))
+
+interaction.plot(results$freeze, results$cooldown, (results$temperature)^2, type = "b", trace.label = "Cooldown Time", xlab = "Freeze", ylab = "Temperature^2", lty = rep(1, 4), col = 1:4, pch = rep(16, 4), lwd = rep(4, 4))
+
+interaction.plot(results$cooldown, results$power, (results$temperature)^2, type = "b", trace.label = "Power Level", xlab = "Cooldown Time", ylab = "Temperature^2", lty = rep(1, 4), col = 1:4, pch = rep(16, 4), lwd = rep(4, 4))
+```
+...no trends are visible, as the lines of each interaction plot look parallel. The only plot where the lines have a major intersection is Side X Cooldown time, where the Right slot appears to be *slightly* "more consistent" than the Left slot in terms of outputting Waffles with equivalent Temperatures regardless of Cooldown Time.
+
+<font size="5">**Results – Latin Square Design:**</font> 
+
+Analysis of the LSD results first required extracting them from the filled-in CSV and recasting each treatment as a factor.
+```{r}
+results_lsd <- read.csv("waffle_lsd_filled_splittreat.csv", header=TRUE)
+results_lsd$plots <- as.factor(results_lsd$plots)
+results_lsd$row <- as.factor(results_lsd$row)
+results_lsd$col <- as.factor(results_lsd$col)
+results_lsd$side <- as.factor(results_lsd$side)
+results_lsd$freeze <- as.factor(results_lsd$freeze)
+```
+
+I also had to slightly modify the column names for interpretability in later analysis, as well as utilize regular expressions to remove all non-numerical data from the cooldown and power columns.
+```{r}
+colnames(results_lsd) <- c("plot", "cooldown", "power", "side", "freeze", "temperature")
+results_lsd$cooldown <- gsub("[a-zA-Z ]", "", results_lsd$cooldown)
+results_lsd$power <- gsub("[a-zA-Z ]", "", results_lsd$power)
+```
+
+Here is my fitting of my model using the aov() function as fit_crd before any transformations of Temperature:
+```{r}
+fit_lsd <- aov(temperature ~ cooldown + power + side * freeze, results_lsd)
+anova(fit_lsd)
+```
+We can see that the Freeze Button retains its significant effect in determining Temperature from the CRFD version. However, there is no siginificant effect for Side or the interaction between Side and Freeze Button.
+
+If we look at the blocking factors, Power Level retains its highly significant effect--controlling for Temeprature variation by having it as a blocking factor was a good idea. Interestingly enough, Cooldown Time loses its significance completely. 
+
+```{r}
+par(mfrow = c(2, 2))
+plot(fit_lsd)
+```
+
+```{r}
+lambda = c(-1, 0, 1, 2)
+boxcox(fit_lsd, lambda)
+```
+The diagnostic plots look relatively normal, although the substantially lower amount of Waffles involved in the LSD version of the experiment lead to more drastic changes compared to the CRFD diagnostic plots. Although Residuals vs Fitted does suggest heteroskedascity, observation of optimal lambda via boxcox() indicates that lambda = 1 (untransformed Temeperature) is within the 95% confidence interval, indicating that we can leave it untransformed according to boxcox() specifically.
+
+Proceeding with the boxplots...
+```{r}
+par(mfrow = c(2, 2))
+plot(temperature ~ cooldown + power + side * freeze, results_lsd)
+```
+Looking at Freeze and Side specifically, the tighter boxplot for the right slot harkens back to the last interaction plot for CRFD, where the right slot may have more consistent temperatures than the left on average. However, their median values are incredibly close, leading to predictibly no difference in average Waffle Temperature.
+
+For the Freeze Button, since Temperature is untransformed, we can see that the median temperature when it is ON is ~180 degrees fahrenheit, compared to ~167 when it is off--a significant difference of approximately 13 degrees.
+
+Analysis using TukeyHSD() will reinforce this claim that having the Freeze Button be ON increases the average Waffle Temperature.
+```{r}
+lsd_tukey_cooldown <- TukeyHSD(fit_lsd, "cooldown")
+lsd_tukey_power <- TukeyHSD(fit_lsd, "power")
+lsd_tukey_side <- TukeyHSD(fit_lsd, "side")
+lsd_tukey_freeze <- TukeyHSD(fit_lsd, "freeze")
+
+par(mfrow = c(2, 2))
+plot(lsd_tukey_cooldown)
+plot(lsd_tukey_power)
+plot(lsd_tukey_side)
+plot(lsd_tukey_freeze)
+```
+Starting with the blocking factors, we can see that Power's significant effect remains, but we can make far fewer conclusions using TukeyHSD than in the CRFD model. In the LSD model, we can only confirm that Power Level 2 results in significantly lower average Waffle Temperatures than Power Levels 4 and 5.
+
+Having the Freeze Button be ON results in a mean increse in Waffle Temperature of about 14 degrees Fahrenheit. No definitive statement can be made about either Cooldown Time or Side.
+
+Looking at the 2-way interaction between Freeze Button and Side...
+```{r}
+interaction.plot(results_lsd$side, results_lsd$freeze, results_lsd$temperature, type = "b",
+trace.label = "Freeze", xlab = "Side", ylab = "
+Temperature", lty = rep(1, 2), col = 1:2, pch = rep
+(16, 2), lwd = rep(4, 2))
+```
+The lack of line intersection suggests no interaction effect. The trend of the Right Side being more consistent Temperature-wise remains, however.
+
+<font size="5">**Conclusions:**</font> 
+
+**Overall:**
+
+From both the CRFD and LSD version of the experiment, with 95% confidence for each claim individually...
+
+1. Power Level has a significant effect on Waffle Temperature, with higher Power Levels generally resulting in higher Waffle Temperatures, all else held equal.
+2. Freeze Button has a significant effect on Waffle Temperature, with the Freeze Button being ON resulting in higher average Waffle Temepratures, all else held equal.
+3. Side has no significant effect on Waffle Temperature.
+
+The following claim is made using the CRFD results only, with 95% confidence:
+
+4. Cooldown Time has a significant effect on Waffle Temperature, with 0 minutes (no cooldown time/instantaneous) resulting in higher average Waffle Temperatures than 5, 10, or 15 minutes.
+
+Other important observations to consider, without being true claims, when answering my initial research question (*What are the effects of changing the toaster power, freeze, and slot settings, as well as waiting between toaster uses, on the output temperature of frozen waffles?*) include the following:
+
+5. The Right Side of the toaster appears to result in more consistent (i.e. lower variance) Waffle Temperatures than the Left Side of the toaster.
+
+**Model Comparision:**
+
+It is worth noting that the LSD version of the experiment required a mere 1/4th of the Waffles as the CRFD version--an important consideration for future experiments in terms of how efficiently I arrive at my conclusions. This comes at the "cost" of lower significance/p-values for every single factor compared to CRFD, and Analysis of Variance was unable to determine the significant effect of Cooldown Time for LSD, whereas it was for CRFD both before and after transforming Temperature.
