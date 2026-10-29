@@ -1,0 +1,405 @@
+---
+title: "SurvivalAnalysis_FinalProject"
+author: "Griffin Lovato"
+date: "2025-12-17"
+output: 
+  html_document:
+    df_print: paged
+  pdf_document: default
+fontsize: 11pt
+header-includes:
+- \usepackage{hyperref}
+- \hypersetup{pdfpagemode={UseNone}, pdfstartview=}
+- \usepackage{amsthm}
+- \theoremstyle{definition}
+- \newtheorem{problem}{Problem}
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Load initial libraries and data
+library(survival)
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(survminer)
+data("heart", package = "survival")
+```
+
+```{r}
+# Add simple time column calculated as difference between stop and start
+heart <- heart %>%
+  mutate(
+    time = stop-start)
+
+# Overview
+summary(heart)
+
+# Creation of dataset restricted to only patients who received heart transplants
+heart <- heart[heart$transplant == 1, ]
+summary(heart)
+```
+
+*3.2 Exploratory Data Analysis*
+
+*Next, we analyze potential relationships between covariates of interest and days from enrollment until death (futime), in order to identify patterns or trends that may influence survival outcomes. The covariates examined include sex and FLC group, as these variables are clinically relevant and hypothesized to impact survival. Boxplots are used to visualize the distribution of survival times across levels of these categorical variables, providing initial insights into group differences.*
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# First plot: Survival Time by Surgery
+p1 <- ggplot(heart, aes(x = factor(surgery), y = time, fill = factor(surgery))) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Survival Time by Surgery", x = "Surgery", y = "Survival Time (days)") +
+  scale_fill_manual(values = c("red", "green")) +
+  theme_minimal()
+
+# Second plot: Survival Time by Age Group
+heart <- heart %>%
+  mutate(
+    trueage = age + 48,
+    trueagegroup = factor(paste0(floor(trueage / 10) * 10, "-", floor(trueage / 10) * 10 + 9))
+  )
+
+p2 <- ggplot(heart, aes(x = factor(trueagegroup), y = time, fill = factor(trueagegroup))) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Survival Time by Age Group", x = "Age Group", y = "Survival Time (days)") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal()
+
+# Third plot: Survival Time by Year Group
+heart <- heart %>%
+  mutate(
+    trueyear = year + 1967 + 305/365, #1 Nov 1967 was the 305th day of the year
+    trueyeargroup = factor(floor(trueyear))
+  )
+
+p3 <- ggplot(heart, aes(x = factor(trueyeargroup), y = time, fill = factor(trueyeargroup))) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Survival Time by Year of Acceptance", x = "Year", y = "Survival Time (days)") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal()
+
+# Display one-by-one
+p1
+p2
+p3
+```
+
+
+*The first boxplot shows relationship between survival time and sex reveals that females exhibit slightly higher median survival times compared to males, though the difference is small. Both groups, display similar overall survival distributions, suggesting that sex may not play a major role in survival outcomes for this cohort.*
+
+*The second boxplot stratifies survival time by the free light chain (FLC) group. Groups 1–6 generally have longer survival times, with many extreme outliers present (e.g., individuals with survival times under 2,000 days). In contrast, groups 7–10 exhibit smaller median survival times and less variability. This pattern suggests a potential relationship between lower FLC group numbers and improved survival outcomes.*
+
+*3.3 Survival Analysis*
+
+*The Kaplan-Meier survival curves presented below explore the survival probabilities for different groups over time (in days). Panel A depicts the survival curve without stratifying by any covariates, providing an overall view of survival probabilities in the cohort. The survival probability decreases steadily over time, with the steepest decline occurring in the earlier periods, indicating a higher risk of death during the initial stages.*
+
+*Panel B stratifies survival curves by the FLC group, revealing clear differences in survival outcomes between the groups. Higher groups exhibit steeper declines in survival probability, indicating poorer survival outcomes compared to lower groups, which maintain higher survival probabilities over the observed period. This trend suggests a possible protective effect associated with lower FLC group numbers, which warrants further investigation.*
+
+*Panel C compares survival probabilities based on age group (Under 60 vs. 60+). The older age group (60+) demonstrates a sharper decline in survival probability compared to the younger group (Under 60), especially in the early stages of follow-up. This highlights age as a potential risk factor for poorer survival outcomes in this cohort.*
+
+*Panel D illustrates survival curves by sex (Male vs. Female). Males experience a slightly steeper decline in survival probability compared to females, though the differences between the two groups are relatively minor. This suggests that while sex may influence survival outcomes, its impact appears to be less pronounced than that of FLC group or age.*
+
+*Overall, these survival curves provide key insights into how survival outcomes differ across covariates, emphasizing the importance of FLC group and age in predicting survival probabilities. These findings set the stage for further statistical analyses, such as Cox proportional hazards modeling, to quantify the effects of these variables on survival outcomes.*
+
+```{r}
+# Load required libraries
+library(survival)
+library(survminer)
+library(dplyr)
+library(cowplot)
+
+# Create age groups for analysis
+
+# Kaplan-Meier estimator without covariates
+km_fit_no_cov <- survfit(Surv(time, event) ~ 1, data = heart)
+
+# Kaplan-Meier estimator stratified by Surgery
+km_fit_surgery <- survfit(Surv(time, event) ~ surgery, data = heart)
+
+# Kaplan-Meier estimator stratified by Age
+km_fit_age_grp <- survfit(Surv(time, event) ~ trueagegroup, data = heart)
+
+# Kaplan-Meier estimator stratified by Year
+km_fit_year_grp <- survfit(Surv(time, event) ~ trueyeargroup, data = heart)
+
+# Create Kaplan-Meier plots using ggsurvplot
+plot_no_cov <- ggsurvplot(
+  km_fit_no_cov,
+  data = heart,
+  conf.int = TRUE,
+  title = "No Covariates",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  ggtheme = theme_minimal(),
+  legend = "none"
+)
+
+plot_surgery <- ggsurvplot(
+  km_fit_surgery,
+  data = heart,
+  conf.int = TRUE,
+  title = "Surgery",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  ggtheme = theme_minimal(),
+  legend.title = "Surgery"
+)
+
+plot_age_grp <- ggsurvplot(
+  km_fit_age_grp,
+  data = heart,
+  conf.int = TRUE,
+  title = "Age Group",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  ggtheme = theme_minimal(),
+  legend.title = "Age Group"
+)
+
+plot_year_grp <- ggsurvplot(
+  km_fit_year_grp,
+  data = heart,
+  conf.int = TRUE,
+  title = "Year",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  ggtheme = theme_minimal(),
+  legend.title = "Year"
+)
+
+# Extract the ggplot objects from the ggsurvplot outputs
+p1 <- plot_no_cov$plot
+p2 <- plot_surgery$plot
+p3 <- plot_age_grp$plot
+p4 <- plot_year_grp$plot
+
+p1
+p2
+p3
+p4
+
+# Combine all plots into a single page
+#combined_plot <- plot_grid(
+#  p1, p2, p3, p4, p5,
+#  labels = c("A", "B", "C", "D", "E"), 
+#  ncol = 2, nrow = 3,             
+#  align = "v"                     
+#)
+
+# Display the combined plot
+#print(combined_plot)
+```
+*Find median survival times*
+
+```{r}
+# Function to extract survival probabilities and confidence intervals at a specific time
+compute_survival_at_time <- function(survfit_object, time_point) {
+  # Extract survival summary for the specific time point
+  survival_summary <- summary(survfit_object, times = time_point, extend = TRUE) #Modified code to compute survival summaries even if survival probability has already reached 0 at the time point
+  
+  # Create a data frame with results
+  result <- data.frame(
+    Group = rownames(summary(survfit_object)$table),
+    Time = time_point,
+    Survival_Prob = survival_summary$surv,
+    Lower_CI = survival_summary$lower,
+    Upper_CI = survival_summary$upper
+  )
+  
+  return(result)
+}
+
+print(km_fit_no_cov)
+
+print(km_fit_surgery)
+
+print(km_fit_age_grp)
+# Compute survival probabilities at 500 days for Age Group
+survival_age_grp <- compute_survival_at_time(km_fit_age_grp, time_point = 500)
+print("Survival Probabilities and 95% CI at 500 Days for Age Group:")
+print(survival_age_grp)
+
+print(km_fit_year_grp)
+# Compute survival probabilities at 500 days for Year
+survival_year_grp <- compute_survival_at_time(km_fit_year_grp, time_point = 500)
+print("Survival Probabilities and 95% CI at 500 Days for Age Group:")
+print(survival_year_grp)
+```
+
+```{r}
+# Log-rank test for Surgery
+logrank_surgery <- survdiff(Surv(time, event) ~ surgery, data = heart)
+print("Log-Rank Test for Surgery:")
+print(logrank_surgery)
+
+# Log-rank test for Age Group
+logrank_age_grp <- survdiff(Surv(time, event) ~ trueagegroup, data = heart)
+print("Log-Rank Test for Age Group:")
+print(logrank_age_grp)
+
+# Log-rank test for Year
+logrank_year_grp <- survdiff(Surv(time, event) ~ trueyeargroup, data = heart)
+print("Log-Rank Test for Year:")
+print(logrank_year_grp)
+```
+
+```{r}
+# Load necessary libraries
+library(survival)
+
+# Ensure relevant columns are factors
+heart$surgery <- as.factor(heart$surgery)
+heart$trueagegroup <- as.factor(heart$trueagegroup)
+
+# Fit the Cox-PH model with surgery and age as covariates
+cox_model <- coxph(Surv(time, event) ~ surgery + trueagegroup, data = heart)
+summary(cox_model) # Display model summary
+
+# --------------------
+# Question 1: Estimate Hazard Ratio (HR) and 95% CI
+# For surgery = 1, age = 30-39 vs. surgery = 0, age = 50-59
+# --------------------
+
+# Extract coefficients
+coef_surgery <- coef(cox_model)["surgery1"] 
+coef_trueagegroup3039 <- coef(cox_model)["trueagegroup30-39"]
+coef_trueagegroup5059 <- coef(cox_model)["trueagegroup50-59"]
+
+# Calculate log(HR)
+log_hr <- (coef_surgery + coef_trueagegroup3039) - (coef_trueagegroup5059)
+hr <- exp(log_hr) # Convert log hazard ratio to hazard ratio
+cat("Hazard Ratio (surgery = 1, age = 30-39 vs. surgery = 0, age = 50-59):", hr, "\n")
+
+# Variance for the combination of coefficients
+var_surgery <- vcov(cox_model)["surgery1", "surgery1"]
+var_trueagegroup <- vcov(cox_model)["trueagegroup30-39", "trueagegroup30-39"]
+cov_surgery_age <- vcov(cox_model)["surgery1", "trueagegroup30-39"]
+
+# Variance for log(HR)
+var_log_hr <- var_surgery + var_trueagegroup + 2 * cov_surgery_age
+se_log_hr <- sqrt(var_log_hr)
+
+# Confidence interval (95%)
+ci_lower <- exp(log_hr - 1.96 * se_log_hr)
+ci_upper <- exp(log_hr + 1.96 * se_log_hr)
+cat("95% CI for HR: [", ci_lower, ", ", ci_upper, "]\n")
+```
+
+```{r}
+# --------------------
+# Question 2: Likelihood Ratio Test for H0: beta surgery = 0
+# --------------------
+
+# Fit a reduced model without surgery
+reduced_model <- coxph(Surv(time, event) ~ trueagegroup, data = heart)
+
+# Perform a likelihood ratio test
+lr_test <- anova(reduced_model, cox_model, test = "LRT")
+cat("\nLikelihood Ratio Test for H0: βsurgery = 0:\n")
+print(lr_test)
+```
+
+
+```{r}
+# 1. Stratified Cox model by age group
+stratified_model <- coxph(Surv(time, event) ~ surgery + strata(trueagegroup), data = heart)
+summary(stratified_model)
+
+# 2. Additive model including age group as a covariate
+additive_model <- coxph(Surv(time, event) ~ surgery + trueagegroup, data = heart)
+summary(additive_model)
+
+# 3. Model with interaction term between surgery and age group
+interaction_model <- coxph(Surv(time, event) ~ surgery * trueagegroup, data = heart)
+summary(interaction_model)
+
+# Compare models using AIC (or likelihood ratio tests)
+cat("AIC for Stratified Model:", AIC(stratified_model), "\n")
+cat("AIC for Additive Model:", AIC(additive_model), "\n")
+cat("AIC for Interaction Model:", AIC(interaction_model), "\n")
+
+# Optional: Perform likelihood ratio test for interaction term
+anova(additive_model, interaction_model, test = "LRT")
+```
+
+```{r}
+library(survival)
+library(survminer)
+
+# 1. Schoenfeld residuals to check proportional hazards assumption
+# Test for non-proportionality of hazards
+ph_test <- cox.zph(cox_model)
+print(ph_test) # Display test results
+
+par(mfrow = c(1,2))
+# Plot scaled Schoenfeld residuals for each covariate
+plot(ph_test, var = "trueagegroup", resid = TRUE, main = "Schoenfeld Residuals for Age")
+plot(ph_test, var = "surgery", resid = TRUE, main = "Schoenfeld Residuals for Surgery")
+```
+
+```{r}
+# 2. Martingale residuals to assess functional form of covariates
+# Extract Martingale residuals
+martingale_resid <- residuals(cox_model, type = "martingale")
+
+par(mfrow = c(1,2))
+# Plot Martingale residuals against age
+plot(heart$trueage, martingale_resid, 
+     xlab = "Age", ylab = "Martingale Residuals", 
+     main = "Martingale Residuals vs Age")
+abline(h = 0, col = "red")
+
+plot(heart$surgery, martingale_resid, 
+     xlab = "Surgery", ylab = "Martingale Residuals", 
+     main = "Martingale Residuals vs Surgery")
+abline(h = 0, col = "red")
+```
+
+```{r}
+# 3. Deviance residuals to identify outliers
+# Extract deviance residuals
+deviance_resid <- residuals(cox_model, type = "deviance")
+
+# Plot deviance residuals
+plot(deviance_resid, 
+     ylab = "Deviance Residuals", xlab = "Observation Index", 
+     main = "Deviance Residuals")
+abline(h = 0, col = "red")
+abline(h = 2, col = "gray", lty = 2)
+abline(h = -2, col = "gray", lty = 2)
+
+# Highlight potential outliers (e.g., top 5 largest residuals)
+potential_outliers <- which(abs(deviance_resid) > 2)
+cat("Potential Outliers (Indices):\n", potential_outliers, "\n")
+```
+
+```{r}
+# Subset outliers
+outliers <- heart[potential_outliers, ]
+
+# Compare covariates: Age, Survival, and FLC Group
+par(mfrow = c(1, 3)) # Arrange plots side-by-side
+
+# Age comparison
+boxplot(heart$trueage, outliers$trueage,
+        names = c("Full Dataset", "Outliers"),
+        main = "Age Comparison",
+        ylab = "Age")
+
+# Age comparison
+boxplot(heart$surgery, outliers$surgery,
+        names = c("Full Dataset", "Outliers"),
+        main = "Surgery Comparison",
+        ylab = "Surgery")
+
+# Boxplot: Survival times comparison
+boxplot(heart$time, 
+        outliers$time, 
+        names = c("Full Dataset", "Outliers"),
+        main = "Survival Times for Outliers",
+        ylab = "Survival Time")
+```
+
