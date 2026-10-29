@@ -1,0 +1,428 @@
+---
+title: "Final Project"
+author: "Anonymous"
+date: "2026-04-24"
+output:
+  html_document:
+    toc: true
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+set.seed(501322)
+library(ggplot2)
+library(tidyverse)
+library(lme4)
+library(MASS)
+```
+
+```{r}
+data <- read_csv("tourism_finaldf.csv")
+
+data$reporter_area_label <- as.factor(data$reporter_area_label)
+```
+
+```{r}
+library(corrplot)
+data_nocountry <- data %>% dplyr::select(-reporter_area_label)
+cor_data <- cor(data_nocountry, use="pairwise.complete.obs")
+corrplot(cor_data)
+heatmap(cor_data, symm = TRUE)
+```
+
+
+```{r}
+lin_0 <- lmer(value ~ 1 + (1 | reporter_area_label), data)
+summary(lin_0)
+plot(lin_0)
+```
+
+```{r}
+lin_year <- lmer(value ~ year + (1 | reporter_area_label), data)
+summary(lin_year)
+plot(lin_year)
+```
+
+```{r}
+lin_all <- lmer(value ~ year + population_l + exchangerate_l + railpassengers_l + gdptotal_l + gdpgrowthrate_l + gdppercapita + 
+                  Airports + NumNatParks + TotalParkAreaKM + ParkAreaPercent + OldestPark + total_sites_cultural + total_sites_mixed + total_sites_natural + 
+                  (1 | reporter_area_label), data)
+summary(lin_all)
+plot(lin_all)
+```
+
+```{r}
+ranef_lin_all <- ranef(lin_all)
+ranef_df <- as.data.frame(ranef_lin_all)
+ranef_selection <- ranef_df %>%
+  filter(abs(condval) > 10000)
+ggplot(ranef_selection, aes(x = condval, y = reorder(grp, condval))) +
+  geom_point(color = "blue", size = 2) +
+  geom_errorbarh(aes(xmin = condval - condsd, xmax = condval + condsd), 
+                 height = 0, color = "darkgray") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Random Effects (Absolute Estimate > 10,000)",
+       x = "Random Effect Estimate",
+       y = "Country")
+```
+
+```{r}
+boxcox(value ~ year, data = data, lambda = seq(-1, 1, by = 0.05))
+```
+
+```{r}
+lin_log_all <- lmer(log(value) ~ year + population_l + exchangerate_l + railpassengers_l + gdptotal_l + gdpgrowthrate_l + gdppercapita + 
+                  Airports + NumNatParks + TotalParkAreaKM + ParkAreaPercent + OldestPark + total_sites_cultural + total_sites_mixed + total_sites_natural + 
+                  (1 | reporter_area_label), data)
+summary(lin_log_all)
+plot(lin_log_all)
+```
+
+```{r}
+data_standardized <- data %>%
+  mutate(year_s = scale(year)) %>%
+  mutate(population_l = scale(population_l)) %>%
+  mutate(exchangerate_l = scale(exchangerate_l)) %>%
+  mutate(railpassengers_l = scale(railpassengers_l)) %>%
+  mutate(gdptotal_l  = scale(gdptotal_l )) %>%
+  mutate(gdpgrowthrate_l = scale(gdpgrowthrate_l)) %>%
+  mutate(gdppercapita  = scale(gdppercapita )) %>%
+  mutate(Airports = scale(Airports)) %>%
+  mutate(NumNatParks = scale(NumNatParks)) %>%
+  mutate(TotalParkAreaKM = scale(TotalParkAreaKM)) %>%
+  mutate(ParkAreaPercent = scale(ParkAreaPercent)) %>%
+  mutate(OldestPark = scale(OldestPark)) %>%
+  mutate(total_sites_cultural = scale(total_sites_cultural)) %>%
+  mutate(total_sites_mixed = scale(total_sites_mixed)) %>%
+  mutate(total_sites_natural = scale(total_sites_natural))
+```
+
+```{r}
+lin_log_all_s <- lmer(log(value) ~ year_s + population_l + exchangerate_l + railpassengers_l + gdptotal_l + gdpgrowthrate_l + gdppercapita + 
+                  Airports + NumNatParks + TotalParkAreaKM + ParkAreaPercent + OldestPark + total_sites_cultural + total_sites_mixed + total_sites_natural + 
+                  (1 | reporter_area_label), data_standardized)
+summary(lin_log_all_s)
+plot(lin_log_all_s)
+```
+
+
+```{r}
+lin_glmer <- glmer(value ~ year_s + population_l + exchangerate_l + railpassengers_l + gdpgrowthrate_l + gdppercapita + 
+                  Airports + NumNatParks + TotalParkAreaKM + OldestPark + total_sites_cultural + total_sites_mixed + total_sites_natural + 
+                  (1 | reporter_area_label), family = poisson(link = "log"), data = data_standardized, nAGQ = 1)
+
+summary(lin_glmer)
+plot(lin_glmer)
+qqnorm(residuals(lin_glmer))
+```
+
+```{r}
+lin_glmer_nb <- glmer.nb(value ~ year_s + population_l + exchangerate_l + railpassengers_l + gdpgrowthrate_l + gdppercapita + 
+                  Airports + NumNatParks + TotalParkAreaKM + OldestPark + total_sites_cultural + total_sites_mixed + total_sites_natural + 
+                  (1 | reporter_area_label), data = data_standardized)
+
+summary(lin_glmer_nb)
+plot(lin_glmer_nb)
+qqnorm(residuals(lin_glmer_nb))
+```
+
+```{r}
+data_mcmcglmm <- data_standardized |> dplyr::select(-railpassengers_l) %>% drop_na()
+
+```
+
+
+```{r}
+library(MCMCglmm)
+prior_poisson <- list(
+  R = list(V = 1, nu = 0.002),
+  G = list(G1 = list(V = 1, nu = 0.002))
+)
+lin_mcmc <- MCMCglmm(round(value, 0) ~ year_s + population_l + exchangerate_l + gdpgrowthrate_l + gdppercapita + 
+                  Airports + NumNatParks + TotalParkAreaKM + OldestPark + total_sites_cultural + total_sites_mixed + total_sites_natural,
+                  random = ~reporter_area_label,
+                  family = "poisson",
+                  data = data_mcmcglmm, 
+                  prior = prior_poisson,
+                  nitt = 50000, 
+                  burnin = 10000, 
+                  thin = 10
+                  )
+```
+
+```{r}
+summary(lin_mcmc)
+```
+
+```{r}
+par(mar=c(2,2,2,2))
+plot(lin_mcmc)
+```
+
+```{r}
+mcmc_output <- predict(lin_mcmc)
+poisson_output <- predict(lin_glmer)
+nb_output <- predict(lin_glmer_nb)
+lin_output <- predict(lin_all)
+
+poisson_output
+nb_output
+```
+
+```{r}
+data_actualvspredicted <- data_mcmcglmm |> dplyr::select(c(...1, reporter_area_label, year, value))
+data_actualvspredicted$mcmc_prediction <- mcmc_output
+
+predicted_rows <- names(poisson_output)
+df_others <- data_standardized[predicted_rows,] %>%
+  dplyr::select(...1) %>%
+  mutate(
+    poisson_prediction = exp(poisson_output),
+    nb_prediction = exp(nb_output),
+    lin_prediction = lin_output
+  )
+
+data_actualvspredicted <- data_actualvspredicted %>%
+  left_join(df_others, by = "...1")
+```
+
+
+```{r}
+data_actualvspredicted_stats <- data_actualvspredicted %>%
+  group_by(reporter_area_label) %>%
+  summarise(
+    mean(value),
+    mean(mcmc_prediction),
+    mean(poisson_prediction, na.rm = TRUE),
+    mean(nb_prediction, na.rm = TRUE),
+    mean(lin_prediction, na.rm = TRUE)
+  )
+
+data_long_avp_s <- data_actualvspredicted_stats %>%
+  pivot_longer(
+    cols = c("mean(mcmc_prediction)", "mean(poisson_prediction, na.rm = TRUE)", "mean(nb_prediction, na.rm = TRUE)", "mean(lin_prediction, na.rm = TRUE)"), 
+    names_to = "model_type", 
+    values_to = "predicted_mean"
+  ) %>%
+  mutate(model_type = case_match(
+    model_type,
+    "mean(mcmc_prediction)" ~ "MCMCglmm",
+    "mean(poisson_prediction, na.rm = TRUE)" ~ "Poisson",
+    "mean(nb_prediction, na.rm = TRUE)" ~ "Negative Binomial",
+    "mean(lin_prediction, na.rm = TRUE)" ~ "Linear"
+  ))
+```
+
+```{r}
+library(ggrepel)
+
+ggplot(data_long_avp_s, aes(x = predicted_mean, y = `mean(value)`, label = reporter_area_label, color = model_type, shape = model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,2000000) +
+  ylim(0,2000000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+
+ggplot(data_long_avp_s, aes(x = predicted_mean, y = `mean(value)`, label = reporter_area_label, color = model_type, shape = model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,100000) +
+  ylim(0,100000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+
+ggplot(data_long_avp_s, aes(x = predicted_mean, y = `mean(value)`, label = reporter_area_label, color = model_type, shape = model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,25000) +
+  ylim(0,25000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+
+ggplot(data_long_avp_s, aes(x = predicted_mean, y = `mean(value)`, label = reporter_area_label, color = model_type, shape = model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,10000) +
+  ylim(0,10000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+```
+
+
+```{r}
+library(ggrepel)
+
+ggplot(data_actualvspredicted_stats, aes(x = `mean(mcmc_prediction)`, y = `mean(value)`, label = reporter_area_label)) +
+  geom_rect(xmin = 0, xmax = 100000, ymin = 0, ymax = 100000, fill = "red", alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,2000000) +
+  ylim(0,2000000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+
+ggplot(data_actualvspredicted_stats, aes(x = `mean(mcmc_prediction)`, y = `mean(value)`, label = reporter_area_label)) +
+  geom_rect(xmin = 0, xmax = 25000, ymin = 0, ymax = 25000, fill = "red", alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,100000) +
+  ylim(0,100000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+
+ggplot(data_actualvspredicted_stats, aes(x = `mean(mcmc_prediction)`, y = `mean(value)`, label = reporter_area_label)) +
+  geom_rect(xmin = 0, xmax = 10000, ymin = 0, ymax = 10000, fill = "red", alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,25000) +
+  ylim(0,25000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+
+ggplot(data_actualvspredicted_stats, aes(x = `mean(mcmc_prediction)`, y = `mean(value)`, label = reporter_area_label)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  xlim(0,10000) +
+  ylim(0,10000) +
+  labs(title = "MCMCglmm Output",
+       x = "Predicted Average Annual Visitors (thousands)",
+       y = "Actual Average Annual Visitors (thousands)")
+```
+
+```{r}
+data_france <- data_actualvspredicted %>% filter(reporter_area_label == "France")
+data_france_long <- data_france %>% 
+  pivot_longer(
+    cols = c(mcmc_prediction, poisson_prediction, nb_prediction, lin_prediction), 
+    names_to = "model_type", 
+    values_to = "predicted"
+  )
+ggplot(data_france_long, aes(x = predicted, y = value, color = model_type, label = year, shape=model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "France Close Look",
+       x = "Predicted Annual Visitors (thousands)",
+       y = "Actual Annual Visitors (thousands)")
+```
+
+```{r}
+data_france <- data_actualvspredicted %>% filter(reporter_area_label == "France")
+data_france_long <- data_france %>% 
+  pivot_longer(
+    cols = c(mcmc_prediction, poisson_prediction, nb_prediction, lin_prediction), 
+    names_to = "model_type", 
+    values_to = "predicted"
+  )
+ggplot(data_france_long, aes(x = predicted, y = value, color = model_type, label = year, shape=model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "France Close Look",
+       x = "Predicted Annual Visitors (thousands)",
+       y = "Actual Annual Visitors (thousands)")
+
+data_us <- data_actualvspredicted %>% filter(reporter_area_label == "United States of America")
+data_us_long <- data_us %>% 
+  pivot_longer(
+    cols = c(mcmc_prediction, poisson_prediction, nb_prediction, lin_prediction), 
+    names_to = "model_type", 
+    values_to = "predicted"
+  )
+ggplot(data_us_long, aes(x = predicted, y = value, color = model_type, label = year, shape=model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "United States Close Look",
+       x = "Predicted Annual Visitors (thousands)",
+       y = "Actual Annual Visitors (thousands)")
+
+data_china <- data_actualvspredicted %>% filter(reporter_area_label == "China")
+data_china_long <- data_china %>% 
+  pivot_longer(
+    cols = c(mcmc_prediction, poisson_prediction, nb_prediction, lin_prediction), 
+    names_to = "model_type", 
+    values_to = "predicted"
+  )
+ggplot(data_china_long, aes(x = predicted, y = value, color = model_type, label = year, shape=model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "China Close Look",
+       x = "Predicted Annual Visitors (thousands)",
+       y = "Actual Annual Visitors (thousands)")
+
+data_spain <- data_actualvspredicted %>% filter(reporter_area_label == "Spain")
+data_spain_long <- data_spain %>% 
+  pivot_longer(
+    cols = c(mcmc_prediction, poisson_prediction, nb_prediction, lin_prediction), 
+    names_to = "model_type", 
+    values_to = "predicted"
+  )
+ggplot(data_spain_long, aes(x = predicted, y = value, color = model_type, label = year, shape=model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "Spain Close Look",
+       x = "Predicted Annual Visitors (thousands)",
+       y = "Actual Annual Visitors (thousands)")
+
+data_mexico <- data_actualvspredicted %>% filter(reporter_area_label == "Mexico")
+data_mexico_long <- data_mexico %>% 
+  pivot_longer(
+    cols = c(mcmc_prediction, poisson_prediction, nb_prediction, lin_prediction), 
+    names_to = "model_type", 
+    values_to = "predicted"
+  )
+ggplot(data_mexico_long, aes(x = predicted, y = value, color = model_type, label = year, shape=model_type)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "Mexico Close Look",
+       x = "Predicted Annual Visitors (thousands)",
+       y = "Actual Annual Visitors (thousands)")
+```
+
+```{r}
+AIC(lin_all)
+AIC(lin_glmer)
+AIC(lin_glmer_nb)
+summary(lin_mcmc)$DIC
+```
+
