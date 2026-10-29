@@ -1,0 +1,263 @@
+---
+title: 'Final Project - World Cup Analysis'
+author: "Griffin Lovato"
+date: "2026-04-29"
+output: 
+  html_document: 
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+set.seed(501322)
+library(ISLR2)
+library(tidyverse)
+library(tree)
+library(dplyr)
+library(tidyr)
+library(randomForest)
+library(reshape2)
+library(gbm)
+library(splitstackshape)
+library(ggrepel)
+```
+
+```{r}
+x_train <- read.csv("x_train.csv")
+x_test <- read_csv("x_test.csv")
+y_train <- read_csv("y_train.csv")
+y_test <- read_csv("y_test.csv")
+```
+
+```{r}
+train <- dplyr::inner_join(x_train, y_train, by = c("X" = "...1"))
+test <- dplyr::inner_join(x_test, y_test, by = "...1")
+
+train <- train %>% select(-"X")
+test <- test %>% select(-"...1")
+
+data <- rbind(train, test)
+
+data$confederation_code <- as.factor(data$confederation_code)
+data$genderfactor <- as.factor(data$genderfactor)
+```
+
+```{r}
+data$rowindicator <- 1:nrow(data)
+train <- stratified(data, c("confederation_code", "genderfactor"), 0.8)
+test <- data[!(data$rowindicator %in% train$rowindicator),]
+train <- train %>% select(-rowindicator)
+test <- test %>% select(-rowindicator)
+```
+
+
+```{r}
+set.seed(501322)
+bag_wc <- randomForest(avg_goals ~ ., data = train, mtry = 11, importance = TRUE)
+bag_wc
+plot(bag_wc)
+varImpPlot(bag_wc)
+```
+
+```{r}
+yhat_bag_wc <- predict(bag_wc, newdata = test)
+plot(yhat_bag_wc, test$avg_goals)
+abline(0, 1)
+mean((yhat_bag_wc - test$avg_goals)^2)
+```
+
+```{r}
+set.seed(501322)
+rf_wc <- randomForest(avg_goals ~ ., data = train, importance = TRUE)
+rf_wc
+plot(rf_wc)
+```
+
+```{r}
+yhat_rf_wc <- predict(rf_wc, newdata = test)
+plot(yhat_rf_wc, test$avg_goals)
+abline(0, 1)
+mean((yhat_rf_wc - test$avg_goals)^2)
+```
+
+```{r}
+regressionTreeMatrix <- function(traindata, testdata, numtrees, mtrys) {
+  outputMatrix <- matrix(, nrow = length(numtrees), ncol = length(mtrys))
+  rownames(outputMatrix) <- paste0("n", numtrees)
+  colnames(outputMatrix) <- paste0("m", mtrys)
+  for(i in 1:length(numtrees)) {
+    for(j in 1:length(mtrys)) {
+      ntree_i <- numtrees[i]
+      mtry_j <- mtrys[j]
+      set.seed(501322)
+      rf <- randomForest(avg_goals ~ ., data = traindata, mtry = mtry_j,
+                            importance = TRUE, ntree = ntree_i)
+      yhat <- predict(rf, newdata = testdata)
+      mse <- mean((yhat - testdata$avg_goals)^2)
+      outputMatrix[i,j] <- mse
+    }
+  }
+  return(outputMatrix)
+}
+
+finalMatrix <- regressionTreeMatrix(train, test, c(1, 25, 50, 75, 100, 200, 300, 400, 500), c(1:11))
+```
+
+```{r}
+finalMatrix
+#finalMatrixScaled <- scale(finalMatrix)
+longData<-melt(finalMatrix)
+longData<-longData[longData$value!=0,]
+
+ggplot(longData, aes(x = Var2, y = Var1)) + 
+  geom_raster(aes(fill=value)) + 
+  scale_fill_gradient(low="grey90", high="red") +
+  labs(x="mtry", y="ntree", title="Matrix") +
+  theme_bw() + theme(axis.text.x=element_text(size=9, angle=0, vjust=0.3),
+                     axis.text.y=element_text(size=9),
+                     plot.title=element_text(size=11))
+```
+
+```{r}
+set.seed(501322)
+rf_wc_optimal <- randomForest(avg_goals ~ ., data = train, mtry = 5, importance = TRUE, ntree = 25)
+rf_wc_optimal
+plot(rf_wc_optimal)
+varImpPlot(rf_wc_optimal)
+
+plot(train$total_attendance, rf_wc_optimal$predicted)
+plot(train$total_matches, rf_wc_optimal$predicted)
+plot(train$quarter, rf_wc_optimal$predicted)
+plot(train$confederation_code, rf_wc_optimal$predicted)
+plot(train$groupstage, rf_wc_optimal$predicted)
+plot(train$final, rf_wc_optimal$predicted)
+plot(train$r16, rf_wc_optimal$predicted)
+plot(train$thirdplace, rf_wc_optimal$predicted)
+plot(train$hostoccurances, rf_wc_optimal$predicted)
+plot(train$genderfactor, rf_wc_optimal$predicted)
+plot(train$semi, rf_wc_optimal$predicted)
+```
+
+```{r}
+yhat_rf_wc_optimal <- predict(rf_wc_optimal, newdata = test)
+plot(yhat_rf_wc_optimal, test$avg_goals)
+abline(0, 1)
+mean((yhat_rf_wc_optimal - test$avg_goals)^2)
+```
+
+```{r}
+regressionTreeMatrix_boost <- function(traindata, testdata, numtrees, learningrates) {
+  outputMatrix <- matrix(, nrow = length(numtrees), ncol = length(learningrates))
+  rownames(outputMatrix) <- paste0("n", numtrees)
+  colnames(outputMatrix) <- paste0("l", learningrates)
+  for(i in 1:length(numtrees)) {
+    for(j in 1:length(learningrates)) {
+      ntree_i <- numtrees[i]
+      learningrate_j <- learningrates[j]
+      set.seed(501322)
+      boost <- gbm(avg_goals ~ ., data = traindata, distribution =
+                     "gaussian", n.trees = ntree_i, shrinkage = 
+                     learningrate_j)
+      yhat <- predict(boost, newdata = testdata)
+      mse <- mean((yhat - testdata$avg_goals)^2)
+      outputMatrix[i,j] <- mse
+    }
+  }
+  return(outputMatrix)
+}
+
+finalMatrix_boost <- regressionTreeMatrix_boost(train, test, c(1, 25, 50, 75, 100, 200, 300, 400, 500), c(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1))
+```
+
+```{r}
+longData_boost<-melt(finalMatrix_boost)
+longData_boost<-longData_boost[longData_boost$value!=0,]
+
+ggplot(longData_boost, aes(x = Var2, y = Var1)) + 
+  geom_raster(aes(fill=value)) + 
+  scale_fill_gradient(low="grey90", high="red") +
+  labs(x="learningrate", y="ntree", title="Matrix") +
+  theme_bw() + theme(axis.text.x=element_text(size=9, angle=0, vjust=0.3),
+                     axis.text.y=element_text(size=9),
+                     plot.title=element_text(size=11))
+```
+
+```{r}
+set.seed(501322)
+boost_optimal <- gbm(avg_goals ~ ., data = train, distribution =
+               "gaussian", n.trees = 100, shrinkage = 0.05)
+boost_optimal
+summary(boost_optimal)
+plot(boost_optimal, i = "total_attendance")
+plot(boost_optimal, i = "confederation_code")
+plot(boost_optimal, i = "quarter")
+plot(boost_optimal, i = "total_matches")
+plot(boost_optimal, i = "r16")
+plot(boost_optimal, i = "groupstage")
+plot(boost_optimal, i = "thirdplace")
+plot(boost_optimal, i = "final")
+plot(boost_optimal, i = "genderfactor")
+```
+
+```{r}
+trainhat_boost_optimal <- predict(boost_optimal)
+mean((trainhat_boost_optimal - train$avg_goals)^2)
+
+yhat_boost_optimal <- predict(boost_optimal, newdata = test)
+plot(yhat_boost_optimal, test$avg_goals)
+abline(0, 1)
+mean((yhat_boost_optimal - test$avg_goals)^2)
+```
+```{r}
+models <- c(rep("Basic (11, 500)" , 2) , rep("Automatic (3, 500)" , 2) , rep("Optimal RF (5, 25)" , 2) , rep("Optimal Boost (0.05, 100)" , 2))
+tt <- rep(c("train", "test") , 4)
+mse <- c(0.2209766, 0.1909169, 0.1961546, 0.194267, 0.224711, 0.1723572, 0.1223594, 0.1573239)
+mse_data <- data.frame(models, tt, mse)
+
+ggplot(mse_data, aes(fill=tt, y=mse, x=models)) +
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+
+```{r}
+data_clean <- read.csv("data_clean.csv")
+data_noNA <- na.omit(data_clean)
+data_prepared <- data_noNA %>% select(-c("X", "Country"))
+data_prepared$confederation_code <- as.factor(data_prepared$confederation_code)
+data_prepared$genderfactor <- as.factor(data_prepared$genderfactor)
+
+data_noNA$predicted_boost <- predict(boost_optimal, newdata = data_prepared)
+data_noNA$predicted_bag <- predict(rf_wc_optimal, newdata = data_prepared)
+```
+
+
+```{r}
+plot_data <- data.frame(
+  actual = data_noNA$avg_goals,
+  predicted_boost = data_noNA$predicted_boost,
+  predicted_bag = data_noNA$predicted_bag,
+  country = data_noNA$Country,
+  confederation = data_noNA$confederation_code
+)
+
+ggplot(plot_data, aes(x = predicted_bag, y = actual, color = confederation, label = country)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "Optimal Random Forest Output (Train + Test)",
+       x = "Predicted Avg. Goals",
+       y = "Actual Avg. Goals",
+       color = "Confederation")
+
+ggplot(plot_data, aes(x = predicted_boost, y = actual, color = confederation, label = country)) +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  theme_minimal() +
+  labs(title = "Optimal Boost Output (Train + Test)",
+       x = "Predicted Avg. Goals",
+       y = "Actual Avg. Goals",
+       color = "Confederation")
+```
+

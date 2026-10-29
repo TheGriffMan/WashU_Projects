@@ -1,0 +1,152 @@
+---
+title: 'Final Project - World Cup Analysis'
+author: "Griffin Lovato"
+date: "2026-04-29"
+output: 
+  html_document: 
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+set.seed(501322)
+library(ISLR2)
+library(tidyverse)
+library(tree)
+library(dplyr)
+library(tidyr)
+```
+
+```{r}
+worldCupMatches <- read_csv("dataset/WorldCupMatches.csv")
+worldCups <- read_csv("dataset/WorldCups.csv")
+host_countries <- read_csv("dataset/host_countries.csv")
+qualified_teams <- read_csv("dataset/qualified_teams.csv")
+teams <- read_csv("dataset/teams.csv")
+```
+
+Figure out how to predict average goals per game based on total goals, world cups entered, and use that to make the bracket and predict the winner.
+
+```{r}
+qt_reduced_p <- qualified_teams %>% select(team_name, performance)
+qt_gather <- gather(qt_reduced_p, key, performance, -team_name) %>%
+  group_by(team_name, key, performance) %>%
+  tally %>%
+  spread(performance, n, fill = 0)
+qt_gather_clean <- data.frame(team_name = as.factor(qt_gather$team_name), final = qt_gather$final + qt_gather$`final round`, thirdplace = qt_gather$`third-place match`, semi = qt_gather$`semi-finals`, quarter = qt_gather$`quarter-final` + qt_gather$`quarter-finals`, r16 = qt_gather$`round of 16`, groupstage = qt_gather$`group stage` + qt_gather$`second group stage`)
+qt_gather_clean
+
+qt_reduced_c <- qualified_teams %>% select(team_name, count_matches)
+qt_match_c = qt_reduced_c %>% group_by(team_name) %>%
+                   summarise(total_matches = sum(count_matches))
+qt_match_c$team_name <- as.factor(qt_match_c$team_name)
+qt_match_c
+```
+
+```{r}
+wcm_reduced <- worldCupMatches %>% select(`Home Team Name`, `Home Team Goals`, `Away Team Name`, `Away Team Goals`, Attendance)
+
+wcm_long <- bind_rows(
+  wcm_reduced %>% select(team_name = `Home Team Name`, goals = `Home Team Goals`, Attendance),
+  wcm_reduced %>% select(team_name = `Away Team Name`, goals = `Away Team Goals`, Attendance)
+)
+
+wcm_stats <- wcm_long %>%
+  group_by(team_name) %>%
+  summarise(
+    total_goals = sum(goals, na.rm = TRUE),
+    avg_goals = mean(goals, na.rm = TRUE),
+    total_attendance = sum(Attendance, na.rm = TRUE),
+    avg_attendance = mean(Attendance, na.rm = TRUE),
+    total_games = n()
+  )
+wcm_stats$team_name <- as.factor(wcm_stats$team_name)
+
+wcm_stats
+```
+
+```{r}
+hc_sum <- table(host_countries$team_name)
+hc_sum_df <- as.data.frame(hc_sum)
+hc_sum_df <- hc_sum_df %>% rename(team_name = Var1, hostoccurances = Freq)
+hc_sum_df
+```
+
+```{r}
+teams_reduced <- teams %>% select(team_name, mens_team, womens_team, confederation_code)
+teams_reduced$genderfactor <- as.factor(ifelse(teams_reduced$mens_team == 1, ifelse(teams_reduced$womens_team == 1, "MW", "M"), "W"))
+teams_reduced$team_name <- as.factor(teams_reduced$team_name)
+teams_reduced$confederation_code <- as.factor(teams_reduced$confederation_code)
+teams_reduced
+```
+
+```{r}
+df1 <- qt_match_c %>% rename(Country = team_name)
+df2 <- qt_gather_clean %>% rename(Country = team_name)
+df3 <- wcm_stats %>% rename(Country = team_name)
+df4 <- hc_sum_df %>% rename(Country = team_name)
+df5 <- teams_reduced %>% rename(Country = team_name)
+all_dfs <- list(df1, df2, df3, df4, df5)
+
+data <- Reduce(
+  function(x, y) merge(x, y, by = "Country", all = TRUE), 
+  all_dfs
+)
+
+data_clean <- data %>%
+  mutate(Country = case_when(
+    Country %in% c("C�te d'Ivoire") ~ "Ivory Coast",
+    Country %in% c("IR Iran") ~ "Iran",
+    Country %in% c("Korea DPR") ~ "North Korea",
+    Country %in% c("Korea Republic") ~ "South Korea",
+    Country %in% c('rn">Bosnia and Herzegovina') ~ "Bosnia and Herzegovina",
+    Country %in% c('rn">Republic of Ireland') ~ "Republic of Ireland",
+    Country %in% c('rn">Serbia and Montenegro') ~ "Serbia and Montenegro",
+    Country %in% c('rn">Trinidad and Tobago') ~ "Trinidad and Tobago",
+    Country %in% c('rn">United Arab Emirates') ~ "United Arab Emirates",
+    Country %in% c("USA") ~ "United States",
+    Country %in% c("China PR") ~ "China",
+    Country %in% c("German DR") ~ "East Germany",
+    Country %in% c("Germany FR") ~ "West Germany",
+    #Country %in% c("Czechoslovakia") ~ "Czech Republic",
+    #Country %in% c("Soviet Union") ~ "Russia",
+    #Country %in% c("Yugoslavia") ~ "Serbia",
+    TRUE ~ Country
+  )) %>%
+  group_by(Country) %>%
+  summarise(across(everything(), ~ {
+    valid_values <- na.omit(.x)
+    if (length(valid_values) > 0) valid_values[1] else NA
+  }))
+
+data_clean$hostoccurances <- ifelse(is.na(data_clean$hostoccurances), 0, data_clean$hostoccurances)
+data_clean$total_goals <- ifelse(is.na(data_clean$total_goals), 0, data_clean$total_goals)
+data_clean$Country <- as.factor(data_clean$Country)
+data_clean <- subset(data_clean, select = -c(mens_team, womens_team))
+data_clean <- data_clean[-nrow(data_clean),]
+data_clean
+
+write.csv(data_clean, "data_clean.csv")
+```
+
+```{r}
+set.seed(501322)
+
+data_nocountry <- subset(data_clean, select = -c(Country, total_goals))
+data_noNA <- na.omit(data_nocountry)
+
+train_index <- sample(82, size = 60, replace = FALSE)
+train_main <- data_noNA[train_index,]
+test_main <- data_noNA[-train_index,]
+
+x_train <- subset(train_main, select = c(total_matches, final, thirdplace, semi, quarter, r16, groupstage, total_attendance, hostoccurances, confederation_code, genderfactor))
+y_train <- subset(train_main, select = avg_goals)
+
+x_test <- subset(test_main, select = c(total_matches, final, thirdplace, semi, quarter, r16, groupstage, total_attendance, hostoccurances, confederation_code, genderfactor))
+y_test <- subset(test_main, select = avg_goals)
+
+write.csv(x_train, "x_train.csv")
+write.csv(x_test, "x_test.csv")
+write.csv(y_train, "y_train.csv")
+write.csv(y_test, "y_test.csv")
+```
